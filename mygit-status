@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+# Shows the status of files in the mygit repository by comparing working directory, index, and repository
+
+import os
+import sys
+import filecmp
+
+def main():
+    program_name = os.path.basename(sys.argv[0])
+    
+    if not os.path.exists(".mygit"):
+        print(f"{program_name}: error: mygit repository directory .mygit not found", file=sys.stderr)
+        sys.exit(1)
+    
+    with open(".mygit/HEAD", "r") as f:
+        branch = f.read().strip()
+    with open(f".mygit/branches/{branch}", "r") as f:
+        current_commit = int(f.read().strip())
+    repo_dir = f".mygit/commits/{current_commit}" if current_commit >= 0 else None
+    
+    index_dir = ".mygit/index"
+    working_dir = os.getcwd()
+    
+    working_files = set(f for f in os.listdir(working_dir) if f != ".mygit")
+    index_files = set(os.listdir(index_dir)) if os.path.exists(index_dir) else set()
+    repo_files = set(os.listdir(repo_dir)) if repo_dir and os.path.exists(repo_dir) else set()
+    all_files = working_files | index_files | repo_files
+    
+    for filename in sorted(all_files):
+        status = []
+        index_path = os.path.join(index_dir, filename)
+        repo_path = os.path.join(repo_dir, filename) if repo_dir else None
+        working_path = filename
+        
+        if filename not in index_files and filename not in repo_files and os.path.exists(working_path):
+            print(f"{filename} - untracked")
+            continue
+        
+        if not os.path.exists(working_path) and filename in repo_files:
+            status.append("file deleted")
+        
+        if filename in index_files:
+            if repo_path and os.path.exists(repo_path):
+                if not filecmp.cmp(index_path, repo_path, shallow=False):
+                    if os.path.exists(working_path) and not filecmp.cmp(index_path, working_path, shallow=False):
+                        status.append("file changed, different changes staged for commit")
+                    else:
+                        status.append("file changed, changes staged for commit")
+            else:
+                status.append("added to index")
+                if not os.path.exists(working_path):
+                    status.append("file deleted")
+                elif os.path.exists(working_path) and not filecmp.cmp(index_path, working_path, shallow=False):
+                    status.append("file changed")
+        
+        if os.path.exists(working_path) and repo_path and os.path.exists(repo_path):
+            if not filecmp.cmp(working_path, repo_path, shallow=False):
+                if filename in index_files and filecmp.cmp(index_path, repo_path, shallow=False):
+                    status.append("file changed, changes not staged for commit")
+            else:
+                if filename not in index_files or (filename in index_files and filecmp.cmp(index_path, repo_path, shallow=False)):
+                    status.append("same as repo")
+        
+        if filename in repo_files and filename not in index_files:
+            status.append("deleted from index")
+        
+        if status:
+            print(f"{filename} - {', '.join(status)}")
+
+if __name__ == "__main__":
+    main() 

@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+# Merges a branch or commit into the current branch in the mygit repository
+
+import os
+import sys
+import filecmp
+import shutil
+
+def main():
+    program_name = os.path.basename(sys.argv[0])
+    args = sys.argv[1:]
+    
+    if len(args) < 1:
+        print(f"usage: {program_name} (branch-name|commit-number) -m message", file=sys.stderr)
+        sys.exit(1)
+    
+    target = args[0]
+    branches_dir = ".mygit/branches"
+    commits_dir = ".mygit/commits"
+    
+    is_branch = os.path.exists(os.path.join(branches_dir, target))
+    is_commit = target.isdigit() and os.path.exists(os.path.join(commits_dir, target))
+    if not is_branch and not is_commit:
+        print(f"{program_name}: error: unknown branch '{target}'", file=sys.stderr)
+        sys.exit(1)
+    
+    if len(args) < 3 or args[1] != "-m" or not args[2]:
+        print(f"{program_name}: error: empty commit message", file=sys.stderr)
+        sys.exit(1)
+    
+    message = args[2]
+    
+    if not os.path.exists(".mygit"):
+        print(f"{program_name}: error: mygit repository directory .mygit not found", file=sys.stderr)
+        sys.exit(1)
+    
+    with open(".mygit/HEAD", "r") as f:
+        current_branch = f.read().strip()
+    if current_branch == target:
+        print(f"{program_name}: error: can not merge branch '{target}' with itself", file=sys.stderr)
+        sys.exit(1)
+    
+    if is_branch:
+        with open(os.path.join(branches_dir, target), "r") as f:
+            target_commit = int(f.read().strip())
+    else:
+        target_commit = int(target)
+    
+    with open(os.path.join(branches_dir, current_branch), "r") as f:
+        current_commit = int(f.read().strip())
+    
+    index_dir = ".mygit/index"
+    index_files = set(os.listdir(index_dir)) if os.path.exists(index_dir) else set()
+    for filename in index_files:
+        if os.path.exists(filename):
+            if not filecmp.cmp(filename, os.path.join(index_dir, filename), shallow=False):
+                print(f"{program_name}: error: Your changes would be lost", file=sys.stderr)
+                sys.exit(1)
+    
+    common_ancestor = 0 if os.path.exists(os.path.join(commits_dir, "0")) else None
+    
+    current_commit_dir = os.path.join(commits_dir, str(current_commit))
+    target_commit_dir = os.path.join(commits_dir, str(target_commit))
+    ancestor_dir = os.path.join(commits_dir, str(common_ancestor)) if common_ancestor is not None else None
+    
+    conflicts = []
+    if os.path.exists(current_commit_dir) and os.path.exists(target_commit_dir):
+        current_files = set(os.listdir(current_commit_dir)) if os.path.exists(current_commit_dir) else set()
+        target_files = set(os.listdir(target_commit_dir)) if os.path.exists(target_commit_dir) else set()
+        all_files = current_files | target_files
+        for filename in all_files:
+            current_path = os.path.join(current_commit_dir, filename) if filename in current_files else None
+            target_path = os.path.join(target_commit_dir, filename) if filename in target_files else None
+            ancestor_path = os.path.join(ancestor_dir, filename) if ancestor_dir and os.path.exists(ancestor_dir) and filename in os.listdir(ancestor_dir) else None
+            
+            if current_path and target_path and ancestor_path:
+                if not filecmp.cmp(current_path, ancestor_path, shallow=False) and not filecmp.cmp(target_path, ancestor_path, shallow=False):
+                    if not filecmp.cmp(current_path, target_path, shallow=False):
+                        conflicts.append(filename)
+            elif (current_path and not target_path and ancestor_path and not filecmp.cmp(current_path, ancestor_path, shallow=False)) or \
+                 (target_path and not current_path and ancestor_path and not filecmp.cmp(target_path, ancestor_path, shallow=False)):
+                conflicts.append(filename)
+            elif current_path and target_path and not ancestor_path:
+                if not filecmp.cmp(current_path, target_path, shallow=False):
+                    conflicts.append(filename)
+    
+    if conflicts:
+        print(f"{program_name}: error: These files can not be merged:")
+        for file in sorted(conflicts):
+            print(file)
+        sys.exit(1)
+    
+    if target_commit > current_commit:
+        with open(os.path.join(branches_dir, current_branch), "w") as f:
+            f.write(f"{target_commit}\n")
+        for item in os.listdir("."):
+            if item != ".mygit":
+                item_path = os.path.join(".", item)
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+        if os.path.exists(index_dir):
+            shutil.rmtree(index_dir)
+        os.makedirs(index_dir, exist_ok=True)
+        for filename in os.listdir(os.path.join(commits_dir, str(target_commit))):
+            shutil.copy2(os.path.join(commits_dir, str(target_commit), filename), filename)
+            shutil.copy2(os.path.join(commits_dir, str(target_commit), filename), os.path.join(index_dir, filename))
+        print("Fast-forward: no commit created")
+        sys.exit(0)
+    
+    existing_commits = [int(d) for d in os.listdir(commits_dir) if d.isdigit()] if os.path.exists(commits_dir) else []
+    next_commit = max(existing_commits, default=-1) + 1
+    commit_dir = os.path.join(commits_dir, str(next_commit))
+    os.mkdir(commit_dir)
+    
+    current_files = set(os.listdir(current_commit_dir)) if os.path.exists(current_commit_dir) else set()
+    target_files = set(os.listdir(target_commit_dir)) if os.path.exists(target_commit_dir) else set()
+    all_files = current_files | target_files
+    for filename in all_files:
+        target_path = os.path.join(target_commit_dir, filename) if filename in target_files else None
+        current_path = os.path.join(current_commit_dir, filename) if filename in current_files else None
+        ancestor_path = os.path.join(ancestor_dir, filename) if ancestor_dir and filename in os.listdir(ancestor_dir) else None
+        dest_path = os.path.join(commit_dir, filename)
+        if target_path and ancestor_path and not filecmp.cmp(target_path, ancestor_path, shallow=False):
+            shutil.copy2(target_path, dest_path)
+        elif current_path and ancestor_path and not filecmp.cmp(current_path, ancestor_path, shallow=False):
+            shutil.copy2(current_path, dest_path)
+        elif target_path and (not current_path or (not ancestor_path or filecmp.cmp(current_path, ancestor_path, shallow=False))):
+            shutil.copy2(target_path, dest_path)
+        elif current_path:
+            shutil.copy2(current_path, dest_path)
+    
+    log_path = ".mygit/log"
+    existing_log = []
+    if os.path.exists(log_path):
+        with open(log_path, "r") as f:
+            existing_log = [line.strip() for line in f.readlines() if line.strip()]
+    log_entries = {int(line.split()[0]): line for line in existing_log}
+    log_entries[next_commit] = f"{next_commit} {message}"
+    all_commits_in_filesystem = [int(d) for d in os.listdir(commits_dir) if d.isdigit()] + [next_commit]
+    for commit_num in all_commits_in_filesystem:
+        if commit_num not in log_entries:
+            log_entries[commit_num] = f"{commit_num} commit-{commit_num}"
+    with open(log_path, "w") as f:
+        for commit_num in sorted(log_entries.keys(), reverse=True):
+            f.write(f"{log_entries[commit_num]}\n")
+    
+    with open(os.path.join(branches_dir, current_branch), "w") as f:
+        f.write(f"{next_commit}\n")
+    
+    for item in os.listdir("."):
+        if item != ".mygit":
+            item_path = os.path.join(".", item)
+            if os.path.isfile(item_path):
+                os.remove(item_path)
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+    if os.path.exists(index_dir):
+        shutil.rmtree(index_dir)
+    os.makedirs(index_dir, exist_ok=True)
+    for filename in os.listdir(commit_dir):
+        shutil.copy2(os.path.join(commit_dir, filename), filename)
+        shutil.copy2(os.path.join(commit_dir, filename), os.path.join(index_dir, filename))
+    
+    print(f"Committed as commit {next_commit}")
+
+if __name__ == "__main__":
+    main() 

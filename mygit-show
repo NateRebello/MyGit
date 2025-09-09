@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+# Displays file contents from a specific commit or index
+
+import os
+import sys
+def main():
+    program_name = os.path.basename(sys.argv[0])
+    if len(sys.argv) != 2:
+        print(f"usage: {program_name} [commit]:filename", file=sys.stderr)
+        sys.exit(1)
+    
+    if not os.path.exists(".mygit"):
+        print(f"{program_name}: error: mygit repository directory .mygit not found", file=sys.stderr)
+        sys.exit(1)
+    
+    arg = sys.argv[1]
+    if ":" not in arg:
+        print(f"{program_name}: error: invalid argument '{arg}'", file=sys.stderr)
+        sys.exit(1)
+    
+    commit, filename = arg.split(":", 1)
+    if commit == "":
+        file_path = os.path.join(".mygit/index", filename)
+    else:
+        try:
+            commit_num = int(commit)
+            if commit_num < 0:
+                raise ValueError
+        except ValueError:
+            print(f"{program_name}: error: invalid commit '{commit}'", file=sys.stderr)
+            sys.exit(1)
+        commit_dir = f".mygit/commits/{commit_num}"
+        if not os.path.exists(commit_dir):
+            print(f"{program_name}: error: unknown commit '{commit}'", file=sys.stderr)
+            sys.exit(1)
+        file_path = os.path.join(commit_dir, filename)
+    
+    if not os.path.exists(file_path):
+        print(f"{program_name}: error: '{filename}' not found in {'index' if commit == '' else f'commit {commit}'}", file=sys.stderr)
+        sys.exit(1)
+    
+    with open(file_path, "r") as f:
+        print(f.read(), end="")
+if __name__ == "__main__":
+    main() 

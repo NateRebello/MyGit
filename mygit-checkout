@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+# Switches to a different branch or commit in the mygit repository
+
+import os
+import sys
+import filecmp
+import shutil
+
+def main():
+    program_name = os.path.basename(sys.argv[0])
+    args = sys.argv[1:]
+    
+    if len(args) != 1:
+        print(f"usage: {program_name} (branch-name|commit-number)", file=sys.stderr)
+        sys.exit(1)
+    
+    target = args[0]
+    branches_dir = ".mygit/branches"
+    commits_dir = ".mygit/commits"
+    
+    is_branch = os.path.exists(os.path.join(branches_dir, target))
+    is_commit = target.isdigit() and os.path.exists(os.path.join(commits_dir, target))
+    
+    if not is_branch and not is_commit:
+        if target.isdigit():
+            print(f"{program_name}: error: unknown commit '{target}'", file=sys.stderr)
+        else:
+            print(f"{program_name}: error: unknown branch '{target}'", file=sys.stderr)
+        sys.exit(1)
+    
+    if not os.path.exists(".mygit"):
+        print(f"{program_name}: error: mygit repository directory .mygit not found", file=sys.stderr)
+        sys.exit(1)
+    
+    with open(".mygit/HEAD", "r") as f:
+        current_branch = f.read().strip()
+    
+    if is_branch:
+        with open(os.path.join(branches_dir, target), "r") as f:
+            target_commit = int(f.read().strip())
+    else:
+        target_commit = int(target)
+    
+    index_dir = ".mygit/index"
+    target_commit_dir = os.path.join(commits_dir, str(target_commit))
+    index_files = set(os.listdir(index_dir)) if os.path.exists(index_dir) else set()
+    working_files = set(os.listdir(".")) - {".mygit"}
+    target_files = set(os.listdir(target_commit_dir)) if os.path.exists(target_commit_dir) else set()
+    conflicts = []
+    for filename in working_files:
+        if filename in target_files:
+            working_path = filename
+            target_path = os.path.join(target_commit_dir, filename)
+            index_path = os.path.join(index_dir, filename) if filename in index_files else None
+            if not filecmp.cmp(working_path, target_path, shallow=False):
+                if not index_path or not filecmp.cmp(working_path, index_path, shallow=False):
+                    conflicts.append(filename)
+    
+    if conflicts:
+        print(f"{program_name}: error: Your changes to the following files would be overwritten by checkout:")
+        for filename in sorted(conflicts):
+            print(filename)
+        sys.exit(1)
+    
+    with open(".mygit/HEAD", "w") as f:
+        f.write(target if is_branch else f"commit {target_commit}\n")
+    
+    for item in os.listdir("."):
+        if item != ".mygit":
+            item_path = os.path.join(".", item)
+            if os.path.isfile(item_path):
+                os.remove(item_path)
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+    
+    if os.path.exists(index_dir):
+        shutil.rmtree(index_dir)
+    os.makedirs(index_dir, exist_ok=True)
+    
+    if os.path.exists(target_commit_dir):
+        for filename in os.listdir(target_commit_dir):
+            shutil.copy2(os.path.join(target_commit_dir, filename), filename)
+            shutil.copy2(os.path.join(target_commit_dir, filename), os.path.join(index_dir, filename))
+    
+    if is_branch:
+        print(f"Switched to branch '{target}'")
+    else:
+        print(f"Switched to commit {target_commit}")
+
+if __name__ == "__main__":
+    main() 

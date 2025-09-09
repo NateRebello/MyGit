@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+# Initializes a new mygit repository by creating .mygit directory structure, including commits, index, branches, HEAD, and log files.
+import os
+import sys
+
+def main():
+    program_name = os.path.basename(sys.argv[0])
+    mygit_dir = ".mygit"
+    
+    if os.path.exists(mygit_dir):
+        print(f"{program_name}: error: .mygit already exists", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        os.mkdir(mygit_dir)
+        os.mkdir(os.path.join(mygit_dir, "commits"))
+        os.mkdir(os.path.join(mygit_dir, "index"))
+        os.mkdir(os.path.join(mygit_dir, "branches"))
+        with open(os.path.join(mygit_dir, "HEAD"), "w") as f:
+            f.write("trunk\n")
+        with open(os.path.join(mygit_dir, "branches", "trunk"), "w") as f:
+            f.write("-1\n")
+        with open(os.path.join(mygit_dir, "log"), "w") as f:
+            pass
+        print(f"Initialized empty mygit repository in {mygit_dir}")
+    except OSError:
+        print(f"{program_name}: error: could not create .mygit", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main() 
